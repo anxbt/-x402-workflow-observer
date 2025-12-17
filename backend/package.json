@@ -1,0 +1,20 @@
+{
+  "name": "x402-backend",
+  "version": "1.0.0",
+  "description": "Minimal observability backend for x402 payment workflow debugger",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.js",
+    "start": "bun run src/index.js"
+  },
+  "keywords": ["x402", "blockchain", "payment", "workflow", "observability"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ethers": "^6.10.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+}
