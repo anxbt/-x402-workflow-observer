@@ -51,6 +51,32 @@ Architecture is modular and extensible to additional Cronos-native x402 use case
 
 ---
 
+## Architecture Overview
+
+```mermaid
+flowchart LR
+    subgraph Chain["Cronos EVM (On-chain)"]
+        SC["x402-Compatible Smart Contract<br/>• Emits workflow events<br/>• No complex state"]
+    end
+
+    subgraph Backend["Backend Indexer (Off-chain)"]
+        IDX["Event Listener<br/>• Subscribes to contract events"]
+        WF["Workflow Reconstructor<br/>• Orders steps<br/>• Handles retries & partial execution"]
+        API["Query API<br/>• /workflows<br/>• /stats"]
+    end
+
+    subgraph Frontend["Operator Dashboard (Read-only)"]
+        UI["Workflow Timeline UI<br/>• Intent<br/>• Decisions<br/>• Settlement<br/>• Completion"]
+    end
+
+    SC -->|On-chain Events| IDX
+    IDX --> WF
+    WF --> API
+    API -->|HTTP Queries| UI
+```
+
+---
+
 ## Current Progress
 - Working prototype built during the **Cronos x402 hackathon**
 - Deployed reference contracts (testnet)
