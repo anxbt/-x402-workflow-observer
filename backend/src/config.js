@@ -12,14 +12,20 @@ export const config = {
   // Server configuration
   port: process.env.PORT || 3000,
   nodeEnv: process.env.NODE_ENV || 'development',
-  
+
   // Blockchain configuration
   rpcUrl: process.env.RPC_URL || 'wss://eth-sepolia.g.alchemy.com/v2/demo',
   chainId: parseInt(process.env.CHAIN_ID || '11155111', 10),
-  
+
   // Contract configuration
   contractAddress: process.env.CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
   blockStart: parseInt(process.env.BLOCK_START || '0', 10),
+
+  // Database configuration
+  databaseUrl: process.env.DATABASE_URL,
+
+  // Reorg safety
+  confirmationBlocks: parseInt(process.env.CONFIRMATION_BLOCKS || '3', 10),
 };
 
 // Workflow status constants
@@ -31,13 +37,18 @@ export const WorkflowStatus = {
 
 // Validate required configuration
 export function validateConfig() {
-  const required = ['rpcUrl', 'contractAddress'];
-  const missing = required.filter(key => !config[key] || config[key] === '0x0000000000000000000000000000000000000000');
-  
+  const required = ['rpcUrl', 'contractAddress', 'databaseUrl'];
+  const missing = required.filter(key => {
+    if (key === 'contractAddress') {
+      return !config[key] || config[key] === '0x0000000000000000000000000000000000000000';
+    }
+    return !config[key];
+  });
+
   if (missing.length > 0) {
-    console.warn(`⚠️  Missing configuration: ${missing.join(', ')}`);
-    console.warn('⚠️  Using default values - update .env for production');
+    console.error(`❌ Missing required configuration: ${missing.join(', ')}`);
+    console.error('❌ Please update .env file');
   }
-  
+
   return missing.length === 0;
 }

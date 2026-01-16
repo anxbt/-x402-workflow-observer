@@ -1,0 +1,107 @@
+// Prisma schema for x402 Workflow Observer
+// Deterministic reconstruction from on-chain events
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================================
+// ChainEvent - Immutable append-only event log
+// ============================================================================
+
+model ChainEvent {
+  id String @id @default(uuid())
+
+  // Workflow identifier
+  workflowId String @db.VarChar(66)
+
+  // Event type
+  eventType EventType
+
+  // Event payload (JSON)
+  payload Json
+
+  // Ordering metadata (CRITICAL for determinism)
+  blockNumber      BigInt
+  transactionIndex Int
+  logIndex         Int
+  txHash           String @db.VarChar(66)
+  blockHash        String @db.VarChar(66)
+  blockTimestamp   BigInt
+
+  // Processing metadata
+  createdAt DateTime @default(now())
+
+  // Unique constraint for idempotency
+  @@unique([txHash, logIndex])
+  // Index for deterministic ordering
+  @@index([blockNumber, transactionIndex, logIndex])
+  @@index([workflowId])
+}
+
+enum EventType {
+  WORKFLOW_STARTED
+  DECISION_RECORDED
+  PAYMENT_EXECUTED
+  WORKFLOW_COMPLETED
+  WORKFLOW_FAILED
+}
+
+// ============================================================================
+// WorkflowState - Derived materialized view (rebuildable from ChainEvent)
+// ============================================================================
+
+model WorkflowState {
+  workflowId String @id @db.VarChar(66)
+
+  // Current status
+  status WorkflowStatus
+
+  // Workflow metadata
+  initiator String @db.VarChar(42)
+
+  // Timestamps (from block.timestamp, NOT Date.now())
+  startedAt   BigInt
+  completedAt BigInt?
+
+  // Failure reason (if failed)
+  failureReason String?
+
+  // Last processed event (for debugging)
+  lastEventBlock    BigInt
+  lastEventLogIndex Int
+
+  // Processing metadata
+  updatedAt DateTime @updatedAt
+}
+
+enum WorkflowStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+// ============================================================================
+// SystemState - Singleton for checkpoint tracking
+// ============================================================================
+
+model SystemState {
+  id Int @id @default(1)
+
+  // Last processed block number
+  lastProcessedBlock BigInt @default(0)
+
+  // Confirmation depth (reorg safety)
+  confirmationBlocks Int @default(3)
+
+  // Last update timestamp
+  updatedAt DateTime @updatedAt
+
+  // Ensure singleton
+  @@map("system_state")
+}
