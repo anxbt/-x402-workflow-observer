@@ -1,153 +1,210 @@
-# x402 Workflow Observer  
-**Grant Application – Cronos Ecosystem**
+# x402 Workflow Observer
 
-## Summary
-**x402 Workflow Observer** is a workflow-level observability and debugging tool for x402-style, agent-driven payments on Cronos. It reconstructs multi-step settlement flows—intent, decisions, settlement, and completion—that are opaque in traditional block explorers.
+A workflow-level observability layer for x402-style agentic payments on EVM chains, starting with Cronos.
 
----
+This system focuses on **deterministic reconstruction of multi-step payment workflows** from immutable on-chain events — not just displaying final settlement transactions.
 
-## Problem
-As payments on Cronos evolve toward **agentic and programmable workflows (x402)**, settlement is no longer a single transaction. Existing tooling primarily shows final state (tx hashes), making it difficult to:
-- Debug failures and partial executions
-- Audit execution paths across multiple steps
-- Understand agent decisions and retries
-- Operate automated payment systems safely
-
-This lack of observability increases risk and slows developer velocity.
+Think **production-aligned observability for programmable payments**, not a block explorer.
 
 ---
 
-## Solution
-We built an **end-to-end observability layer** that:
-- Listens to **x402-compatible smart contract events** on Cronos
-- Reconstructs **workflow execution history**
-- Visualizes flows as a **timeline** showing intent → decisions → settlement → completion
+## Table of Contents
 
-The system is **read-only**, **protocol-agnostic**, and designed to become more valuable as x402 flows grow more complex.
-
----
-
-## Target Users
-- Cronos developers building x402-based payment systems
-- Protocol teams operating agentic or automated settlements
-- Infra operators auditing and monitoring on-chain workflows
-
----
-
-## Key Differentiation
-- **Workflow-level visibility**, not tx-level
-- Focus on **execution understanding**, not payment execution
-- Complements x402 primitives rather than replacing them
-- Designed for **infra reliability** and operator debugging
+- [Why This Exists](#why-this-exists)
+- [Core Guarantees](#core-guarantees)
+- [Non-Goals (Explicit)](#non-goals-explicit)
+- [High-Level Architecture](#high-level-architecture)
+- [Deterministic Reconstruction Model](#deterministic-reconstruction-model)
+- [Event Ordering Guarantees](#event-ordering-guarantees)
+- [Client-Side Model (Reviewer FAQ)](#client-side-model-reviewer-faq)
+- [Validation (Quick Summary)](#validation-quick-summary)
+- [Current Limitations](#current-limitations)
+- [Positioning](#positioning)
+- [Roadmap (High-Level)](#roadmap-high-level)
+- [Status](#status)
+- [License](#license)
 
 ---
 
-## Technical Overview
-- **On-chain:** x402-compatible reference contract emitting workflow events
-- **Backend:** Event listener and indexer reconstructing execution history
-- **Frontend:** Dashboard visualizing timelines and states for operators
+## Why This Exists
 
-Architecture is modular and extensible to additional Cronos-native x402 use cases.
+x402 enables programmable, agent-driven payment flows.  
+But as soon as payments become multi-step (intent → decision → settlement → finality), debugging becomes difficult:
+
+- Block explorers only show final state
+- Failed workflows lose execution context
+- Restarts wipe in-memory monitoring state
+- There is no workflow-level timeline
+
+This project addresses that gap by treating **on-chain events as the source of truth** and reconstructing workflow state deterministically.
 
 ---
 
-## Architecture Overview
+## Core Guarantees
+
+This system **does guarantee**:
+
+- **Deterministic reconstruction** of workflows from persisted on-chain events
+- **Stateless backend recovery** (restart-safe)
+- **Strict event ordering** by `(blockNumber, transactionIndex, logIndex)`
+- **Immutable raw event storage**
+- **Chain-derived timestamps** (`block.timestamp`, not system time)
+- **Idempotent ingestion** via `(txHash, logIndex)` uniqueness
+- **Polling-based ingestion** compatible with Cronos RPC
+
+This system **does not rely on**:
+- in-memory caches
+- frontend-derived state
+- event subscription filters
+
+---
+
+## Non-Goals (Explicit)
+
+This project intentionally does **NOT** attempt to solve:
+
+- Off-chain execution tracing (HTTP requests, agent logs)
+- Facilitator or orchestrator SDK integration
+- Full reorg rollback beyond confirmation depth
+- Sub-second / real-time guarantees
+- Acting as a general-purpose block explorer
+
+These are future extensions, not part of the current scope.
+
+---
+
+## High-Level Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Chain["Cronos EVM (On-chain)"]
-        SC["x402-Compatible Smart Contract<br/>• Emits workflow events<br/>• No complex state"]
-    end
-
-    subgraph Backend["Backend Indexer (Off-chain)"]
-        IDX["Event Listener<br/>• Subscribes to contract events"]
-        WF["Workflow Reconstructor<br/>• Orders steps<br/>• Handles retries & partial execution"]
-        API["Query API<br/>• /workflows<br/>• /stats"]
-    end
-
-    subgraph Frontend["Operator Dashboard (Read-only)"]
-        UI["Workflow Timeline UI<br/>• Intent<br/>• Decisions<br/>• Settlement<br/>• Completion"]
-    end
-
-    SC -->|On-chain Events| IDX
-    IDX --> WF
-    WF --> API
-    API -->|HTTP Queries| UI
+    RPC[Cronos RPC] -->|eth_getLogs polling| Ingestor
+    Ingestor --> ChainEvent[(ChainEvent<br/>Immutable Event Store)]
+    ChainEvent --> Replay[Deterministic Replay Engine]
+    Replay --> WorkflowState[(WorkflowState<br/>Derived View)]
+    WorkflowState --> API[Backend APIs]
+    API --> UI[Frontend Dashboard]
 ```
 
 ---
 
-## Current Progress
-- Working prototype built during the **Cronos x402 hackathon**
-- Deployed reference contracts (testnet)
-- Backend indexing live events
-- Functional dashboard demonstrating real-time workflow observability
-- Early validation through public builder discussions
+## Deterministic Reconstruction Model
 
-_No mainnet deployment or production users yet._
+On every backend startup:
 
----
+1. All derived workflow state is deleted
+2. Raw chain events are loaded from the database
+3. Events are ordered strictly by blockchain position
+4. Workflow state is rebuilt using a pure reducer
 
-## Roadmap on Cronos
-**Next milestones (3–6 months):**
-1. Harden event indexing for long-running workflows
-2. Support additional x402 payment patterns on Cronos
-3. Public Cronos testnet deployment for builders
-4. Improve documentation and reference examples
-5. Explore integrations with Cronos-native protocols using x402
+**No cached state is trusted.**
 
-**Impact:** Lower friction for complex automation, safer deployments, and increased on-chain activity driven by confidence in observability.
+```mermaid
+sequenceDiagram
+    participant DB as Database
+    participant BE as Backend
+    participant R as Reducer
 
----
-
-## Open Source
-The project will remain **open source** to maximize ecosystem adoption and developer contribution within Cronos.
-
----
-
-## Token Status
-No token exists and there are **no immediate plans** to launch one. Focus remains on infrastructure and developer tooling.
+    BE->>DB: DELETE FROM WorkflowState
+    BE->>DB: SELECT * FROM ChainEvent ORDER BY block, tx, log
+    loop For each event
+        BE->>R: reduce(event)
+        R-->>BE: updated state
+    end
+    BE->>DB: INSERT rebuilt WorkflowState
+```
 
 ---
 
-## Grant Usage
-Requested funds will be used to:
-- Improve reliability and performance of on-chain event indexing
-- Extend support for additional Cronos-native x402 workflows
-- Maintain a public Cronos deployment
-- Produce high-quality developer documentation
+## Event Ordering Guarantees
+
+All events are processed in strict canonical order:
+
+```
+(blockNumber ASC, transactionIndex ASC, logIndex ASC)
+```
+
+This ordering is:
+
+- Enforced at the database level
+- Validated in the reducer
+- Required for deterministic replay
 
 ---
 
-## Requested Grant Amount
-**USD $12,000** (paid in cryptocurrency on Cronos)
+## Client-Side Model (Reviewer FAQ)
+
+**Is anything derived client-side?**  
+No.
+
+The frontend is a pure read model over backend APIs:
+
+- No workflow state is derived in the browser
+- No ordering logic exists client-side
+- No caching beyond standard HTTP fetch behavior
+
+All workflow timelines originate from backend-reconstructed state.
 
 ---
 
-## Team
-- **Anubrat Sahoo** — Full-stack Web3 developer  
-  Smart contracts, backend indexing, frontend dashboard
+## Validation (Quick Summary)
 
-- **Advisory / Ecosystem Support (Informal)**  
-  Support for developer communication and ecosystem outreach. Not involved in core protocol or smart contract development.
+The system has been validated with the following procedure:
 
----
+1. Deploy contract to Cronos testnet
+2. Execute workflows on-chain
+3. Observe workflows in UI
+4. Kill backend
+5. Restart backend
+6. Confirm workflows reappear identically
 
-## Relevant Past Projects
-- **EIP-2535 Diamond (Facets) Implementation**  
-  Implemented modular smart contract architecture focusing on upgradeable execution, facet routing, and separation of concerns.
-
-- **Arbitrum L3 → L2 Execution Mapping**  
-  Explored cross-layer execution and state propagation between L3 and L2 environments.
+A full walkthrough is available in [VALIDATION.md](./VALIDATION.md).
 
 ---
 
-## Links
-- GitHub: https://github.com/<your-org>/x402-workflow-observer  
-- Hackathon Submission: <DoraHacks link>  
-- Demo: <demo link if available>
+## Current Limitations
+
+- Initial sync requires a correct `BLOCK_START`
+- Polling introduces ~5s discovery latency
+- No historical indexing beyond configured contract
+- No cross-contract aggregation yet
+
+These are known and documented trade-offs.
 
 ---
 
-## Closing
-x402 Workflow Observer provides the **missing observability layer** required for agentic payment systems to scale safely on Cronos. This grant will enable continued development beyond the hackathon and support the Cronos developer ecosystem with reliable, infrastructure-grade tooling.
+## Positioning
+
+This project is **not** an x402 explorer.
+
+It is closer to:
+
+- OpenTelemetry-style observability
+- Workflow reconstruction tooling
+- Debug infrastructure for programmable payments
+
+**Block explorers show what settled.**  
+**This shows how a workflow executed.**
+
+---
+
+## Roadmap (High-Level)
+
+- Optional off-chain signal ingestion (explicit, opt-in)
+- Facilitator/orchestrator adapters
+- Multi-contract workflow aggregation
+- Reorg-aware rollback handling
+- Testnet → mainnet deployments
+
+---
+
+## Status
+
+This is a validated infrastructure prototype with production-aligned ingestion and replay architecture.
+
+It is designed to **scale in correctness before scale in features**.
+
+---
+
+## License
+
+MIT

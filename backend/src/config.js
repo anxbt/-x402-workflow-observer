@@ -26,6 +26,9 @@ export const config = {
 
   // Reorg safety
   confirmationBlocks: parseInt(process.env.CONFIRMATION_BLOCKS || '3', 10),
+
+  // Polling configuration
+  pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '5000', 10),
 };
 
 // Workflow status constants
